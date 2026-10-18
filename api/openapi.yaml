@@ -1,0 +1,486 @@
+openapi: 3.0.3
+info:
+  title: Edition — newsroom API
+  version: 1.0.0
+  description: "the api of my project"
+servers:
+  - { url: / }
+security:
+  - bearerAuth: []
+x-common-errors: &errors
+  "400": { $ref: "#/components/responses/BadRequest" }
+  "401": { $ref: "#/components/responses/Unauthorized" }
+  "403": { $ref: "#/components/responses/Forbidden" }
+  "404": { $ref: "#/components/responses/NotFound" }
+  "422": { $ref: "#/components/responses/InvalidInput" }
+  "500": { $ref: "#/components/responses/InternalError" }
+  "503": { $ref: "#/components/responses/Unavailable" }
+paths:
+  /health/live:
+    get:
+      operationId: liveness
+      responses:
+        "200":
+          description: "OK"
+          content: {application/json: {schema: {$ref: '#/components/schemas/Liveness'}}}
+      security: []
+  /health/ready:
+    get:
+      operationId: readiness
+      responses:
+        "200":
+          description: "OK"
+          content: {application/json: {schema: {$ref: '#/components/schemas/Readiness'}}}
+        "503": { $ref: "#/components/responses/Unavailable" }
+      security: []
+  /docs:
+    get:
+      operationId: swaggerUI
+      security: []
+      responses:
+        "200":
+          description: "Swagger UI."
+          content: {text/html: {schema: {type: string}}}
+  /v1/handshake:
+    post:
+      operationId: handshake
+      responses:
+        "200":
+          description: "OK"
+          content: {application/json: {schema: {$ref: '#/components/schemas/Session'}}}
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+      description: "Вход по client_id и API-ключу. В ответе JWT."
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Handshake" }
+            example: { client_id: editor, api_key: replace-with-editor-api-key }
+  /v1/notes:
+    post:
+      operationId: submitNote
+      responses:
+        "201":
+          description: "Заметка принята."
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Receipt" }
+                  - type: object
+                    properties:
+                      status: {type: string, enum: [accepted]}
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+        "200":
+          description: "Повтор: исходная квитанция."
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Receipt" }
+                  - type: object
+                    properties:
+                      status: {type: string, enum: [duplicate]}
+        "422":
+          description: "Отказ с причиной."
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Receipt" }
+                  - type: object
+                    properties:
+                      status: {type: string, enum: [rejected]}
+                      reason: {type: string}
+                    required: [reason]
+      description: "Заметка от staff/outstaff. Повтор — с тем же request_id и данными."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Submission" }
+            example:
+              request_id: source-001
+              category: science
+              topic: New telescope
+              body: The observatory opened today.
+              event_at: "2026-10-18T10:00:00Z"
+  /v1/stories:
+    get:
+      operationId: listStories
+      responses:
+        <<: *errors
+        "200":
+          description: "OK"
+          content: {application/json: {schema: {$ref: '#/components/schemas/StoryList'}}}
+      parameters:
+        - name: state
+          in: query
+          required: false
+          description: "Состояние новости."
+          schema: {type: string, enum: [collecting, published]}
+        - name: category
+          in: query
+          required: false
+          description: "Рубрика."
+          schema: {type: string}
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+  /v1/stories/{id}:
+    get:
+      operationId: getStory
+      responses:
+        <<: *errors
+        "200":
+          description: "OK"
+          content: {application/json: {schema: {$ref: '#/components/schemas/Story'}}}
+      parameters:
+        - { $ref: "#/components/parameters/ResourceID" }
+  /v1/stats/me:
+    get:
+      operationId: myStatistics
+      responses:
+        <<: *errors
+        "200":
+          description: "OK"
+          content: {application/json: {schema: {$ref: '#/components/schemas/Stats'}}}
+  /v1/stats/{id}:
+    get:
+      operationId: clientStatistics
+      responses:
+        <<: *errors
+        "200":
+          description: "OK"
+          content: {application/json: {schema: {$ref: '#/components/schemas/Stats'}}}
+      description: "Своя статистика; редактор может смотреть любого клиента."
+      parameters:
+        - { $ref: "#/components/parameters/ResourceID" }
+  /v1/messages:
+    get:
+      operationId: inbox
+      responses:
+        <<: *errors
+        "200":
+          description: "OK"
+          content: {application/json: {schema: {$ref: '#/components/schemas/NotificationList'}}}
+      description: "Свои сообщения. Чтение не подтверждает получение."
+      parameters:
+        - name: after
+          in: query
+          required: false
+          description: "Сообщения с ID больше указанного."
+          schema: {type: integer}
+        - { $ref: "#/components/parameters/Limit" }
+        - name: unacked
+          in: query
+          required: false
+          description: "Только неподтверждённые."
+          schema: {type: boolean}
+  /v1/messages/{id}/ack:
+    post:
+      operationId: acknowledgeMessage
+      responses:
+        <<: *errors
+        "204": { description: "Подтверждено." }
+      description: "Подтвердить своё сообщение. Повтор безопасен."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+  /v1/editor/clients:
+    post:
+      operationId: createClient
+      responses:
+        <<: *errors
+        "201":
+          description: "OK"
+          content: {application/json: {schema: {$ref: '#/components/schemas/ClientCreated'}}}
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+      description: "Создать клиента и получить ключ. Только редактор."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Client" }
+  /v1/editor/clients/{id}/key:
+    post:
+      operationId: rotateClientKey
+      description: "Перевыпустить API-ключ клиента. Только редактор. Каждый вызов заменяет ключ; при потере ответа можно повторить. Ранее выданные JWT действуют до истечения срока или отключения клиента."
+      parameters:
+        - { $ref: "#/components/parameters/ResourceID" }
+      responses:
+        <<: *errors
+        "200":
+          description: "Новый ключ для рукопожатия."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [api_key]
+                properties:
+                  api_key: {type: string}
+  /v1/editor/clients/{id}:
+    patch:
+      operationId: updateClient
+      responses:
+        <<: *errors
+        "200":
+          description: "OK"
+          content: {application/json: {schema: {$ref: '#/components/schemas/Client'}}}
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+      description: "Изменить доверие и доступ клиента. Только редактор."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClientUpdate" }
+      parameters:
+        - { $ref: "#/components/parameters/ResourceID" }
+  /v1/editor/policy:
+    get:
+      operationId: getPolicy
+      responses:
+        <<: *errors
+        "200":
+          description: "OK"
+          content: {application/json: {schema: {$ref: '#/components/schemas/Policy'}}}
+      description: "Настройки публикации. Только редактор."
+    put:
+      operationId: setPolicy
+      responses:
+        <<: *errors
+        "200":
+          description: "OK"
+          content: {application/json: {schema: {$ref: '#/components/schemas/Policy'}}}
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+      description: "Настройки для следующих заметок. Только редактор."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Policy" }
+  /v1/editor/stats:
+    get:
+      operationId: allStatistics
+      responses:
+        <<: *errors
+        "200":
+          description: "OK"
+          content: {application/json: {schema: {$ref: '#/components/schemas/StatsList'}}}
+      description: "Статистика всех клиентов. Только редактор."
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Offset" }
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, description: JWT из /v1/handshake.}
+  schemas:
+    Client:
+      type: object
+      required: [id, name, role, trust, enabled]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        role: {type: string, enum: [editor, staff, outstaff]}
+        trust: {type: number}
+        enabled: {type: boolean}
+    ClientCreated:
+      type: object
+      required: [client, api_key]
+      properties:
+        client: { $ref: "#/components/schemas/Client" }
+        api_key: {type: string}
+    ClientUpdate:
+      type: object
+      required: [trust, enabled]
+      properties:
+        trust: {type: number}
+        enabled: {type: boolean}
+    Policy:
+      type: object
+      required: [threshold, half_life_seconds, congratulations_count]
+      properties:
+        threshold: {type: number}
+        half_life_seconds: {type: integer}
+        congratulations_count: {type: integer}
+    Handshake:
+      type: object
+      required: [client_id, api_key]
+      properties:
+        client_id: {type: string}
+        api_key: {type: string}
+    Session:
+      type: object
+      required: [token, expires_at, client]
+      properties:
+        token: {type: string}
+        expires_at: {type: string}
+        client: { $ref: "#/components/schemas/Client" }
+    Submission:
+      type: object
+      required: [request_id, category, topic, body, event_at]
+      properties:
+        request_id: {type: string}
+        category: {type: string}
+        topic: {type: string}
+        body: {type: string}
+        event_at: {type: string}
+    Receipt:
+      type: object
+      required: [status, note_id, story_id, received_at, published]
+      properties:
+        status: {type: string, enum: [accepted, duplicate, rejected]}
+        note_id: {type: string}
+        story_id: {type: string}
+        received_at: {type: string}
+        published: {type: boolean}
+        reason: {type: string}
+    Contribution:
+      type: object
+      required: [client_id, name, trust, event_at, received_at, rank]
+      properties:
+        client_id: {type: string}
+        name: {type: string}
+        trust: {type: number}
+        event_at: {type: string}
+        received_at: {type: string}
+        rank: {type: integer}
+    Story:
+      type: object
+      required: [id, category, topic, state, trust, published_at, contributors]
+      properties:
+        id: {type: string}
+        category: {type: string}
+        topic: {type: string}
+        state: {type: string, enum: [collecting, published]}
+        trust: {type: number}
+        published_at: {type: string, nullable: true}
+        contributors:
+          type: array
+          items: { $ref: "#/components/schemas/Contribution" }
+    Stats:
+      type: object
+      required: [client_id, accepted, published, publication_share, stories, sensations, average_rank]
+      properties:
+        client_id: {type: string}
+        accepted: {type: integer}
+        published: {type: integer}
+        publication_share: {type: number}
+        stories: {type: integer}
+        sensations: {type: integer}
+        average_rank: {type: number}
+    Notification:
+      type: object
+      required: [id, story_id, rank, message, created_at, acknowledged]
+      properties:
+        id: {type: integer}
+        story_id: {type: string}
+        rank: {type: integer}
+        message: {type: string}
+        created_at: {type: string}
+        acknowledged: {type: boolean}
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code: {type: string}
+            message: {type: string}
+            request_id: {type: string}
+    Liveness:
+      type: object
+      required: [status, version, commit]
+      properties:
+        status: {type: string, enum: [ok]}
+        version: {type: string}
+        commit: {type: string}
+    Readiness:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [ready]}
+    StoryList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Story" }
+    StatsList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Stats" }
+    NotificationList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Notification" }
+  responses:
+    BadRequest:
+      description: "Некорректный JSON."
+      content: &errorContent
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: "Неверный ключ или JWT. Возможно, клиент отключён."
+      content: *errorContent
+    Forbidden:
+      description: "Недостаточно прав."
+      content: *errorContent
+    NotFound:
+      description: "Не найдено."
+      content: *errorContent
+    Conflict:
+      description: "ID уже занят или изменены данные повторного запроса."
+      content: *errorContent
+    PayloadTooLarge:
+      description: "Тело запроса больше 64 КБ."
+      content: *errorContent
+    InternalError:
+      description: "Ошибка сервера."
+      content: *errorContent
+    Unavailable:
+      description: "БД недоступна или истёк таймаут."
+      content: *errorContent
+    InvalidInput:
+      description: "Некорректные данные."
+      content: *errorContent
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: "Размер страницы."
+      schema: {type: integer}
+    Offset:
+      name: offset
+      in: query
+      required: false
+      description: "Сколько записей пропустить."
+      schema: {type: integer}
+    ResourceID:
+      name: id
+      in: path
+      required: true
+      schema: {type: string}

@@ -1,0 +1,96 @@
+name: edition
+
+x-app: &app
+  image: ${COMPOSE_PROJECT_NAME:-edition}-app:local
+  build: .
+
+x-database-env: &database-env
+  DATABASE_URL: postgres://${POSTGRES_USER:-edition}:${POSTGRES_PASSWORD:-edition-local-password}@db:5432/${POSTGRES_DB:-edition}?sslmode=disable
+
+services:
+  db:
+    image: postgres:18.6-alpine3.24
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-edition}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-edition-local-password}
+      POSTGRES_DB: ${POSTGRES_DB:-edition}
+    ports:
+      - "127.0.0.1:${DB_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  migrate:
+    <<: *app
+    entrypoint: ["/app/migrate"]
+    command: ["up"]
+    environment: *database-env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    <<: *app
+    environment:
+      <<: *database-env
+      HTTP_ADDR: :8080
+      EDITOR_API_KEY: ${EDITOR_API_KEY:?Copy .env.example to .env and set EDITOR_API_KEY}
+      JWT_SECRET: ${JWT_SECRET:?Set a separate JWT_SECRET of 32 to 256 characters in .env}
+      SESSION_TTL: ${SESSION_TTL:-24h}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:${HTTP_PORT:-8080}:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    read_only: true
+    healthcheck:
+      test: ["CMD", "/app/server", "--healthcheck"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+      retries: 12
+    restart: unless-stopped
+
+  seed:
+    <<: *app
+    profiles: [tools]
+    entrypoint: ["/app/seed"]
+    environment:
+      <<: *database-env
+      DEMO_API_KEY: ${DEMO_API_KEY:-demo-only-shared-api-key-2026}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  e2e:
+    profiles: [test]
+    image: python:3.13.16-slim-bookworm
+    working_dir: /project
+    command:
+      - sh
+      - -ec
+      - |
+        pip install --no-cache-dir -r tests/requirements.txt
+        exec pytest -v -p no:cacheprovider tests/e2e --junitxml=/reports/junit.xml
+    environment:
+      EDITION_URL: http://app:8080
+      EDITOR_API_KEY: ${EDITOR_API_KEY:?Set EDITOR_API_KEY}
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./tests:/project/tests:ro
+      - ${TEST_REPORTS_DIR:-./artifacts/e2e}:/reports
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  postgres-data:

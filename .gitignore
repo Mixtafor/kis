@@ -1,0 +1,12 @@
+.env*
+!.env.example
+/bin/
+/.tools/
+/.venv/
+/artifacts/
+/coverage/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.test
+.DS_Store
